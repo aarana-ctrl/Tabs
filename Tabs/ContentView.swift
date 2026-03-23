@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  Tabs
 //
-//  Created by Aaditya Rana on 3/22/26.
+//  Created by Aaditya Rana on 3/22/26
 //
 
 import SwiftUI
