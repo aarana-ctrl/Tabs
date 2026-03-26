@@ -18,6 +18,7 @@ struct ContentView: View {
                 LoginView()
             }
         }
-        .animation(.easeInOut(duration: 0.35), value: vm.isLoggedIn)
+        .animation(.tabsFluid, value: vm.isLoggedIn)
+        .preferredColorScheme(vm.isDarkMode ? .dark : .light)
     }
 }

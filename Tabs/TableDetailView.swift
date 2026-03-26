@@ -18,8 +18,16 @@ struct TableDetailView: View {
     @State private var showLogEntry = false
     @State private var selectedPlayer: TablePlayer? = nil
     @State private var showStartSessionConfirm = false
+    @State private var showDeleteTableConfirm = false
+    @State private var showResetSessionConfirm = false
     @State private var activeSession: GameSession? = nil
     @State private var isLoadingSession = false
+    // Captured at tap-time so sheet closures always have valid values even if
+    // the underlying state transitions while the sheet is open.
+    @State private var sessionForSheet: GameSession? = nil
+    @State private var logEntryPlayer: TablePlayer? = nil
+    @State private var showDisputeFund = false
+    @State private var showSettlement = false
 
     private var currentTable: PokerTable {
         vm.tables.first(where: { $0.id == table.id }) ?? table
@@ -37,9 +45,16 @@ struct TableDetailView: View {
                     // Top summary card
                     summaryCard
 
+                    // Settlement banner (shown while table settlement is active)
+                    if currentTable.isInSettlement {
+                        Button { showSettlement = true } label: { settlementBanner }
+                            .buttonStyle(ScaleButtonStyle())
+                    }
+
                     // Dispute banner (if any)
-                    if currentTable.disputedAmount > 0 {
-                        disputeBanner
+                    if abs(currentTable.disputedAmount) > 0.001 {
+                        Button { showDisputeFund = true } label: { disputeBanner }
+                            .buttonStyle(ScaleButtonStyle())
                     }
 
                     // Session action area
@@ -58,16 +73,61 @@ struct TableDetailView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showLeaderboard = true
-                } label: {
-                    Label("Leaderboard", systemImage: "trophy.fill")
-                        .font(.tabsBody(13, weight: .semibold))
-                        .foregroundColor(.tabsPrimary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Color.tabsCard)
-                        .cornerRadius(.tabsPillRadius)
+                HStack(spacing: 8) {
+                    // Leaderboard button
+                    Button {
+                        showLeaderboard = true
+                    } label: {
+                        Label("Leaderboard", systemImage: "trophy.fill")
+                            .font(.tabsBody(13, weight: .semibold))
+                            .foregroundColor(.tabsPrimary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.tabsCard)
+                            .cornerRadius(.tabsPillRadius)
+                    }
+
+                    // Admin menu — only visible to admin
+                    if isAdmin {
+                        Menu {
+                            if activeSession != nil {
+                                Button(role: .destructive) {
+                                    showResetSessionConfirm = true
+                                } label: {
+                                    Label("Reset Current Session", systemImage: "arrow.counterclockwise")
+                                }
+                            }
+                            // Settle Table — only when no active game session
+                            if activeSession == nil {
+                                if currentTable.isInSettlement {
+                                    Button {
+                                        showSettlement = true
+                                    } label: {
+                                        Label("View Settlement", systemImage: "dollarsign.circle")
+                                    }
+                                } else {
+                                    Button {
+                                        Task { await vm.startTableSettlement(table: currentTable) }
+                                    } label: {
+                                        Label("Settle Table", systemImage: "dollarsign.circle")
+                                    }
+                                }
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                showDeleteTableConfirm = true
+                            } label: {
+                                Label("Delete Table", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.tabsPrimary)
+                                .padding(10)
+                                .background(Color.tabsCard)
+                                .clipShape(Circle())
+                        }
+                    }
                 }
             }
         }
@@ -75,20 +135,41 @@ struct TableDetailView: View {
             vm.selectTable(currentTable)
             Task { await loadSession() }
         }
+        .onChange(of: vm.selectedTable?.activeSessionId) { _, newId in
+            if newId != activeSession?.id {
+                Task { await loadSession() }
+            }
+        }
         .onDisappear { vm.stopListeners() }
+        .sheet(isPresented: $showSettlement) {
+            TableSettlementView(table: currentTable)
+                .environmentObject(vm)
+        }
+        .sheet(isPresented: $showDisputeFund) {
+            DisputeFundView(table: currentTable)
+                .environmentObject(vm)
+        }
         .sheet(isPresented: $showLeaderboard) {
             LeaderboardView(table: currentTable)
                 .environmentObject(vm)
         }
         .sheet(isPresented: $showSession, onDismiss: { Task { await loadSession() } }) {
-            if let session = activeSession {
-                SessionView(table: currentTable, session: session)
-                    .environmentObject(vm)
+            // Use sessionForSheet (captured at tap time) so the sheet keeps its
+            // content even after closeSession() sets activeSession → nil.
+            if let session = sessionForSheet {
+                NavigationStack {
+                    SessionView(table: currentTable, session: session)
+                        .environmentObject(vm)
+                }
             }
         }
         .sheet(isPresented: $showLogEntry) {
-            if let player = vm.currentPlayer(for: currentTable.id) {
-                LogEntryView(table: currentTable, player: player)
+            // Use the player captured at tap time so this closure always has
+            // a valid value — re-evaluating vm.currentPlayer here can return
+            // nil during a listener transition and produce a blank sheet.
+            if let session = activeSession,
+               let player = logEntryPlayer ?? vm.currentPlayer(for: currentTable.id) {
+                LogEntryView(table: currentTable, session: session, player: player)
                     .environmentObject(vm)
                     .presentationDetents([.medium, .large])
                     .presentationCornerRadius(.tabsSheetRadius)
@@ -98,11 +179,38 @@ struct TableDetailView: View {
             PlayerDetailView(player: player, table: currentTable)
                 .environmentObject(vm)
         }
+        // Start new session confirmation
         .alert("Start New Session?", isPresented: $showStartSessionConfirm) {
             Button("Start") { Task { await startSession() } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will open a new session for all players in \(currentTable.name).")
+        }
+        // Reset session confirmation
+        .alert("Reset Current Session?", isPresented: $showResetSessionConfirm) {
+            Button("Reset", role: .destructive) {
+                Task {
+                    if let session = activeSession {
+                        await vm.resetSession(session)
+                        await loadSession()
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("All submitted entries for this session will be deleted and the session will restart. This cannot be undone.")
+        }
+        // Delete table confirmation
+        .alert("Delete \"\(currentTable.name)\"?", isPresented: $showDeleteTableConfirm) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    await vm.deleteTable(currentTable)
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete the table and all its data. This cannot be undone.")
         }
     }
 
@@ -134,6 +242,36 @@ struct TableDetailView: View {
         .tabsCard()
     }
 
+    // MARK: - Settlement Banner
+
+    private var settlementBanner: some View {
+        let settled = currentTable.settledPlayerIds.count
+        let total   = vm.players.filter { abs($0.totalEarnings) > 0.001 }.count
+        return HStack(spacing: 12) {
+            Image(systemName: "dollarsign.circle.fill")
+                .foregroundColor(.tabsGreen)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Table Settlement Active")
+                    .font(.tabsBody(13, weight: .semibold))
+                    .foregroundColor(.tabsGreen)
+                Text("\(settled) of \(total) players settled")
+                    .font(.tabsBody(12))
+                    .foregroundColor(.tabsGreen.opacity(0.8))
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.tabsGreen.opacity(0.5))
+        }
+        .padding(16)
+        .background(Color.tabsGreen.opacity(0.08))
+        .cornerRadius(.tabsCardRadius)
+        .overlay(
+            RoundedRectangle(cornerRadius: .tabsCardRadius)
+                .strokeBorder(Color.tabsGreen.opacity(0.2), lineWidth: 1)
+        )
+    }
+
     // MARK: - Dispute Banner
 
     private var disputeBanner: some View {
@@ -141,14 +279,17 @@ struct TableDetailView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.tabsRed)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Disputed Amount")
+                Text("Dispute Fund")
                     .font(.tabsBody(13, weight: .semibold))
                     .foregroundColor(.tabsRed)
-                Text(currentTable.disputedAmount.currencyString + " in unresolved disputes")
+                Text(currentTable.disputedAmount.signedCurrencyString + " in unresolved disputes")
                     .font(.tabsBody(12))
                     .foregroundColor(.tabsRed.opacity(0.8))
             }
             Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.tabsRed.opacity(0.5))
         }
         .padding(16)
         .background(Color.tabsRed.opacity(0.08))
@@ -166,6 +307,9 @@ struct TableDetailView: View {
             if let session = activeSession {
                 // Active session card
                 Button {
+                    // Capture now so the sheet still has a valid session
+                    // even after closeSession() sets activeSession to nil.
+                    sessionForSheet = session
                     showSession = true
                 } label: {
                     HStack(spacing: 14) {
@@ -176,14 +320,20 @@ struct TableDetailView: View {
                             Circle()
                                 .fill(Color.tabsGreen)
                                 .frame(width: 12, height: 12)
+                                .shadow(color: Color.tabsGreen.opacity(0.6), radius: 4)
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Session \(session.sessionNumber) — Live")
                                 .font(.tabsBody(15, weight: .semibold))
                                 .foregroundColor(.tabsPrimary)
-                            Text("Started \(session.startedAt.shortDisplay)")
+                            // Live entry count — updates as players submit
+                            let submitted = vm.sessionEntries.count
+                            let total = currentTable.memberIds.count
+                            Text("\(submitted)/\(total) entries · Started \(session.startedAt.shortDisplay)")
                                 .font(.tabsBody(12))
-                                .foregroundColor(.tabsSecondary)
+                                .foregroundColor(submitted == total ? .tabsGreen : .tabsSecondary)
+                                .contentTransition(.numericText())
+                                .animation(.tabsSnap, value: submitted)
                         }
                         Spacer()
                         Text("View")
@@ -201,6 +351,10 @@ struct TableDetailView: View {
                 // Log entry button for current player
                 if vm.currentPlayer(for: currentTable.id) != nil {
                     Button {
+                        // Capture the player NOW at tap time, not lazily in
+                        // the sheet closure — prevents blank sheet if
+                        // vm.players transitions during a listener update.
+                        logEntryPlayer = vm.currentPlayer(for: currentTable.id)
                         showLogEntry = true
                     } label: {
                         Label("Log My Entry", systemImage: "pencil.and.list.clipboard")
@@ -217,7 +371,7 @@ struct TableDetailView: View {
                     Label("Start New Session", systemImage: "play.fill")
                         .font(.tabsBody(15, weight: .semibold))
                 }
-                .buttonStyle(TabsPrimaryButtonStyle(color: .tabsPrimary))
+                .buttonStyle(TabsPrimaryButtonStyle(color: .tabsGreen))
             } else {
                 // No session, not admin
                 HStack(spacing: 10) {
@@ -246,22 +400,37 @@ struct TableDetailView: View {
                     .frame(maxWidth: .infinity)
                     .padding()
             } else {
+                // Use enumerated so rank = index + 1 (O(N)) instead of
+                // calling firstIndex per player which is O(N²).
                 LazyVStack(spacing: 8) {
-                    ForEach(vm.players) { player in
+                    ForEach(Array(vm.players.enumerated()), id: \.element.id) { index, player in
                         Button {
                             selectedPlayer = player
                         } label: {
-                            PlayerRowCard(player: player, rank: rankOf(player))
+                            PlayerRowCard(
+                                player: player,
+                                rank: index + 1,
+                                adminBadge: player.userId == currentTable.adminId ? .admin
+                                          : currentTable.coAdminIds.contains(player.userId) ? .coAdmin
+                                          : nil,
+                                settlementTag: currentTable.isInSettlement
+                                    ? (currentTable.settledPlayerIds.contains(player.id) ? .settled
+                                       : player.totalEarnings > 0.001 ? .receives(player.totalEarnings)
+                                       : player.totalEarnings < -0.001 ? .owes(abs(player.totalEarnings))
+                                       : nil)
+                                    : nil
+                            )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ScaleButtonStyle())
+                        .transition(.asymmetric(
+                            insertion: .push(from: .bottom).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                     }
                 }
+                .animation(.tabsSpring, value: vm.players.count)
             }
         }
-    }
-
-    private func rankOf(_ player: TablePlayer) -> Int {
-        (vm.players.firstIndex(where: { $0.id == player.id }) ?? 0) + 1
     }
 
     // MARK: - Actions
@@ -269,6 +438,13 @@ struct TableDetailView: View {
     private func loadSession() async {
         isLoadingSession = true
         activeSession = await vm.fetchActiveSession(tableId: currentTable.id)
+        // Start the entry listener here too so the session card shows live counts
+        // even when SessionView is not open.
+        if let session = activeSession {
+            vm.startEntryListener(tableId: currentTable.id, sessionId: session.id)
+        } else {
+            vm.clearEntryListener()
+        }
         isLoadingSession = false
     }
 
@@ -278,11 +454,39 @@ struct TableDetailView: View {
     }
 }
 
+// MARK: - Settlement Tag
+
+enum SettlementTag {
+    case owes(Double)      // this player needs to pay
+    case receives(Double)  // this player will be paid
+    case settled           // admin has marked this player done
+}
+
+// MARK: - Admin Badge Role
+
+enum AdminBadgeRole {
+    case admin    // table creator — labelled "Admin"
+    case coAdmin  // promoted member — labelled "Co-Admin"
+
+    var label: String {
+        switch self {
+        case .admin:   return "Admin"
+        case .coAdmin: return "Co-Admin"
+        }
+    }
+}
+
 // MARK: - Player Row Card
 
 struct PlayerRowCard: View {
     let player: TablePlayer
     let rank: Int
+    /// Pass nil for regular members; .admin for the creator; .coAdmin for promoted members.
+    var adminBadge: AdminBadgeRole? = nil
+    /// Non-nil only during an active table settlement.
+    var settlementTag: SettlementTag? = nil
+
+    private static let gold = Color(red: 1.0, green: 0.76, blue: 0.0)
 
     var body: some View {
         HStack(spacing: 14) {
@@ -317,9 +521,25 @@ struct PlayerRowCard: View {
 
             Spacer()
 
-            Text(player.totalEarnings.signedCurrencyString)
-                .font(.tabsMono(16))
-                .foregroundColor(player.totalEarnings.earningsColor)
+            // Admin / Co-Admin gold badge
+            if let badge = adminBadge {
+                Text(badge.label)
+                    .font(.tabsBody(10, weight: .semibold))
+                    .foregroundColor(Self.gold)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Self.gold.opacity(0.12))
+                    .cornerRadius(8)
+            }
+
+            // Settlement tag replaces earnings during active settlement
+            if let tag = settlementTag {
+                settlementTagView(tag)
+            } else {
+                Text(player.totalEarnings.signedCurrencyString)
+                    .font(.tabsMono(15))
+                    .foregroundColor(player.totalEarnings.earningsColor)
+            }
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
@@ -328,6 +548,32 @@ struct PlayerRowCard: View {
         .padding(14)
         .background(Color.tabsCard)
         .cornerRadius(18)
+    }
+
+    @ViewBuilder
+    private func settlementTagView(_ tag: SettlementTag) -> some View {
+        switch tag {
+        case .settled:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.tabsGreen)
+        case .owes(let amt):
+            Text("–\(amt.currencyString)")
+                .font(.tabsMono(13))
+                .foregroundColor(.tabsRed)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.tabsRed.opacity(0.08))
+                .cornerRadius(8)
+        case .receives(let amt):
+            Text("+\(amt.currencyString)")
+                .font(.tabsMono(13))
+                .foregroundColor(.tabsGreen)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.tabsGreen.opacity(0.08))
+                .cornerRadius(8)
+        }
     }
 
     private var rankColor: Color {

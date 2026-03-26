@@ -12,8 +12,27 @@ struct LeaderboardView: View {
     @EnvironmentObject var vm: AppViewModel
     @Environment(\.dismiss) var dismiss
 
+    /// Persisted per-device so each player's preference survives app restarts.
+    @AppStorage("leaderboard_mode") private var modeRaw: String = LeaderboardMode.cycle.rawValue
+
+    private var mode: LeaderboardMode {
+        LeaderboardMode(rawValue: modeRaw) ?? .cycle
+    }
+
+    enum LeaderboardMode: String, CaseIterable {
+        case cycle   = "This Cycle"
+        case allTime = "All-Time"
+
+        func earnings(for player: TablePlayer) -> Double {
+            switch self {
+            case .cycle:   return player.totalEarnings
+            case .allTime: return player.lifetimeEarnings + player.totalEarnings
+            }
+        }
+    }
+
     private var sorted: [TablePlayer] {
-        vm.players.sorted { $0.totalEarnings > $1.totalEarnings }
+        vm.players.sorted { mode.earnings(for: $0) > mode.earnings(for: $1) }
     }
 
     var body: some View {
@@ -34,7 +53,31 @@ struct LeaderboardView: View {
                     Spacer()
                     DismissButton()
                 }
-                .padding(24)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 14)
+
+                // Mode toggle
+                HStack(spacing: 0) {
+                    ForEach(LeaderboardMode.allCases, id: \.self) { m in
+                        Button {
+                            withAnimation(.tabsSnap) { modeRaw = m.rawValue }
+                        } label: {
+                            Text(m.rawValue)
+                                .font(.tabsBody(13, weight: .semibold))
+                                .foregroundColor(mode == m ? .white : .tabsSecondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(mode == m ? Color.tabsPrimary : Color.clear)
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+                .padding(4)
+                .background(Color.tabsCard)
+                .cornerRadius(16)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
 
                 // Podium (top 3)
                 if sorted.count >= 3 {
@@ -47,8 +90,12 @@ struct LeaderboardView: View {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 8) {
                         ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, player in
-                            LeaderboardRow(player: player, rank: idx + 1)
-                                .padding(.horizontal, 16)
+                            LeaderboardRow(
+                                player: player,
+                                rank: idx + 1,
+                                displayEarnings: mode.earnings(for: player)
+                            )
+                            .padding(.horizontal, 16)
                         }
                     }
                     .padding(.bottom, 32)
@@ -62,15 +109,10 @@ struct LeaderboardView: View {
 
     private var podiumView: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            // 2nd place
-            PodiumBlock(player: sorted[1], rank: 2, height: 90)
-
-            // 1st place
-            PodiumBlock(player: sorted[0], rank: 1, height: 120)
-
-            // 3rd place (if exists)
+            PodiumBlock(player: sorted[1], rank: 2, height: 90,  displayEarnings: mode.earnings(for: sorted[1]))
+            PodiumBlock(player: sorted[0], rank: 1, height: 120, displayEarnings: mode.earnings(for: sorted[0]))
             if sorted.count >= 3 {
-                PodiumBlock(player: sorted[2], rank: 3, height: 70)
+                PodiumBlock(player: sorted[2], rank: 3, height: 70, displayEarnings: mode.earnings(for: sorted[2]))
             } else {
                 Spacer()
             }
@@ -85,6 +127,7 @@ struct PodiumBlock: View {
     let player: TablePlayer
     let rank: Int
     let height: CGFloat
+    var displayEarnings: Double
 
     private var medalColor: Color {
         switch rank {
@@ -123,9 +166,9 @@ struct PodiumBlock: View {
                 .foregroundColor(.tabsPrimary)
                 .lineLimit(1)
 
-            Text(player.totalEarnings.signedCurrencyString)
+            Text(displayEarnings.signedCurrencyString)
                 .font(.tabsMono(13))
-                .foregroundColor(player.totalEarnings.earningsColor)
+                .foregroundColor(displayEarnings.earningsColor)
 
             // Podium base
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -146,6 +189,7 @@ struct PodiumBlock: View {
 struct LeaderboardRow: View {
     let player: TablePlayer
     let rank: Int
+    var displayEarnings: Double
 
     private var rankColor: Color {
         switch rank {
@@ -180,10 +224,9 @@ struct LeaderboardRow: View {
 
             Spacer()
 
-            // Bar visualization (relative to max)
-            Text(player.totalEarnings.signedCurrencyString)
+            Text(displayEarnings.signedCurrencyString)
                 .font(.tabsMono(15))
-                .foregroundColor(player.totalEarnings.earningsColor)
+                .foregroundColor(displayEarnings.earningsColor)
         }
         .padding(14)
         .background(Color.tabsCard)

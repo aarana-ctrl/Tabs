@@ -18,9 +18,11 @@ struct PlayerDetailView: View {
     @Environment(\.dismiss) var dismiss
 
     @State private var history: [SessionEntry] = []
+    @State private var activeSession: GameSession? = nil
     @State private var isLoading = true
     @State private var chartMode: ChartMode = .line
     @State private var showLogEntry = false
+    @State private var confirmationMessage: String? = nil
 
     enum ChartMode: String, CaseIterable {
         case line = "Line"
@@ -31,6 +33,15 @@ struct PlayerDetailView: View {
     private var isCurrentUser: Bool {
         player.userId == vm.currentUser?.id
     }
+
+    // Live table from vm so we reflect real-time co-admin changes
+    private var liveTable: PokerTable {
+        vm.tables.first(where: { $0.id == table.id }) ?? table
+    }
+
+    private var viewerIsAdmin: Bool { vm.isAdmin(of: liveTable) }
+    private var playerIsMainAdmin: Bool { liveTable.adminId == player.userId }
+    private var playerIsCoAdmin: Bool { liveTable.coAdminIds.contains(player.userId) }
 
     // Cumulative data for line chart
     private var cumulativeData: [(index: Int, value: Double, date: Date)] {
@@ -66,6 +77,11 @@ struct PlayerDetailView: View {
                     // History list
                     historySection
 
+                    // Admin co-admin management (only when viewer is admin and looking at someone else)
+                    if viewerIsAdmin && !isCurrentUser && !playerIsMainAdmin {
+                        adminActionsSection
+                    }
+
                     Spacer(minLength: 40)
                 }
                 .padding(.horizontal, 16)
@@ -75,7 +91,8 @@ struct PlayerDetailView: View {
         .navigationTitle(player.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if isCurrentUser && table.hasActiveSession {
+            // Only show Log Entry when we have a confirmed active session
+            if isCurrentUser, activeSession != nil {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Log Entry") { showLogEntry = true }
                         .font(.tabsBody(14, weight: .semibold))
@@ -84,15 +101,49 @@ struct PlayerDetailView: View {
             }
         }
         .sheet(isPresented: $showLogEntry) {
-            LogEntryView(table: table, player: player)
-                .environmentObject(vm)
-                .presentationDetents([.medium, .large])
-                .presentationCornerRadius(.tabsSheetRadius)
+            // Pass the session directly — same pattern as TableDetailView
+            if let session = activeSession {
+                LogEntryView(table: table, session: session, player: player)
+                    .environmentObject(vm)
+                    .presentationDetents([.medium, .large])
+                    .presentationCornerRadius(.tabsSheetRadius)
+            }
         }
         .task {
-            history = await vm.fetchPlayerHistory(playerId: player.id, tableId: table.id)
+            async let historyFetch = vm.fetchPlayerHistory(playerId: player.id, tableId: table.id)
+            async let sessionFetch = vm.fetchActiveSession(tableId: table.id)
+            history = await historyFetch
+            activeSession = await sessionFetch
             isLoading = false
         }
+        // Auto-dismiss confirmation toast after 2 s
+        .task(id: confirmationMessage) {
+            guard confirmationMessage != nil else { return }
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation(.tabsSpring) {
+                confirmationMessage = nil
+            }
+        }
+        // Confirmation toast overlay
+        .overlay(alignment: .bottom) {
+            if let msg = confirmationMessage {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.tabsGreen)
+                    Text(msg)
+                        .font(.tabsBody(14, weight: .semibold))
+                        .foregroundColor(.tabsPrimary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(Color.tabsCard)
+                .cornerRadius(20)
+                .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
+                .padding(.bottom, 32)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.tabsSpring, value: confirmationMessage != nil)
     }
 
     // MARK: - Hero Card
@@ -143,7 +194,7 @@ struct PlayerDetailView: View {
                 HStack(spacing: 0) {
                     ForEach(ChartMode.allCases, id: \.self) { mode in
                         Button {
-                            withAnimation(.easeInOut(duration: 0.2)) { chartMode = mode }
+                            withAnimation(.tabsSnap) { chartMode = mode }
                         } label: {
                             Image(systemName: mode.icon)
                                 .font(.system(size: 14, weight: .medium))
@@ -249,6 +300,57 @@ struct PlayerDetailView: View {
                             .foregroundStyle(Color.tabsSecondary)
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - Admin Actions Section
+
+    @ViewBuilder
+    private var adminActionsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ADMIN ACTIONS")
+                .font(.tabsBody(11, weight: .semibold))
+                .foregroundColor(.tabsSecondary)
+                .tracking(1.5)
+
+            if playerIsCoAdmin {
+                // Already a co-admin — offer to demote back to regular player
+                Button {
+                    Task {
+                        await vm.demoteCoAdmin(userId: player.userId, table: liveTable)
+                        withAnimation(.tabsSpring) {
+                            confirmationMessage = "\(player.name) is now a regular player"
+                        }
+                    }
+                } label: {
+                    Label("Remove Co-Admin", systemImage: "person.badge.minus")
+                        .font(.tabsBody(15, weight: .semibold))
+                        .foregroundColor(.tabsRed)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color.tabsRed.opacity(0.08))
+                        .cornerRadius(.tabsPillRadius)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: .tabsPillRadius)
+                                .strokeBorder(Color.tabsRed.opacity(0.2), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            } else {
+                // Regular member — offer to promote
+                Button {
+                    Task {
+                        await vm.promoteToCoAdmin(userId: player.userId, table: liveTable)
+                        withAnimation(.tabsSpring) {
+                            confirmationMessage = "\(player.name) is now a Co-Admin"
+                        }
+                    }
+                } label: {
+                    Label("Make Co-Admin", systemImage: "person.badge.plus")
+                        .font(.tabsBody(15, weight: .semibold))
+                }
+                .buttonStyle(TabsPrimaryButtonStyle(color: Color(red: 1.0, green: 0.76, blue: 0.0)))
             }
         }
     }

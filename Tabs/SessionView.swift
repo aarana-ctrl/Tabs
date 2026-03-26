@@ -18,6 +18,7 @@ struct SessionView: View {
     @State private var players: [TablePlayer] = []
     @State private var showSettlement = false
     @State private var isClosing = false
+    @State private var editingEntry: SessionEntry? = nil
 
     private var isAdmin: Bool { vm.isAdmin(of: table) }
 
@@ -43,14 +44,17 @@ struct SessionView: View {
                     // Balance check
                     balanceCard
 
-                    // Submitted entries
+                    // Submitted entries — animate in as each new entry arrives
                     if !entries.isEmpty {
                         submittedEntriesSection
+                            .transition(.push(from: .top).combined(with: .opacity))
+                            .animation(.tabsSpring, value: entries.count)
                     }
 
                     // Pending players
                     if !pendingPlayers.isEmpty {
                         pendingSection
+                            .animation(.tabsSpring, value: pendingPlayers.count)
                     }
 
                     // Admin close button
@@ -66,12 +70,31 @@ struct SessionView: View {
         }
         .navigationTitle("Session \(session.sessionNumber)")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Back")
+                            .font(.tabsBody(16))
+                    }
+                    .foregroundColor(.tabsPrimary)
+                }
+            }
+        }
         .onAppear {
             players = vm.players
+            // Seed from current state immediately — onChange only fires on
+            // *changes*, so if vm.sessionEntries already has entries when this
+            // view appears, it would stay empty without this line.
+            entries = vm.sessionEntries
             vm.startEntryListener(tableId: table.id, sessionId: session.id)
         }
         .onChange(of: vm.sessionEntries) { _, new in
-            entries = new
+            withAnimation(.tabsSpring) { entries = new }
         }
         .sheet(isPresented: $showSettlement) {
             SettlementView(
@@ -81,6 +104,13 @@ struct SessionView: View {
                 totalNet: totalNet
             )
             .environmentObject(vm)
+            .interactiveDismissDisabled(false)
+        }
+        .sheet(item: $editingEntry) { entry in
+            EditEntrySheet(entry: entry)
+                .environmentObject(vm)
+                .presentationDetents([.medium, .large])
+                .presentationCornerRadius(.tabsSheetRadius)
         }
         .overlay { if isClosing { LoadingOverlay() } }
     }
@@ -177,16 +207,40 @@ struct SessionView: View {
 
     private var submittedEntriesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("SUBMITTED")
-                .font(.tabsBody(11, weight: .semibold))
-                .foregroundColor(.tabsSecondary)
-                .tracking(1.5)
+            HStack {
+                Text("SUBMITTED")
+                    .font(.tabsBody(11, weight: .semibold))
+                    .foregroundColor(.tabsSecondary)
+                    .tracking(1.5)
+                if isAdmin {
+                    Spacer()
+                    Text("Tap to edit")
+                        .font(.tabsBody(11))
+                        .foregroundColor(.tabsSecondary)
+                }
+            }
 
             LazyVStack(spacing: 8) {
                 ForEach(entries) { entry in
-                    SessionEntryCard(entry: entry)
+                    if isAdmin {
+                        Button { editingEntry = entry } label: {
+                            SessionEntryCard(entry: entry, showEditChevron: true)
+                        }
+                        .buttonStyle(ScaleButtonStyle())
+                        .transition(.asymmetric(
+                            insertion: .push(from: .top).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                    } else {
+                        SessionEntryCard(entry: entry)
+                            .transition(.asymmetric(
+                                insertion: .push(from: .top).combined(with: .opacity),
+                                removal: .opacity
+                            ))
+                    }
                 }
             }
+            .animation(.tabsSpring, value: entries.count)
         }
     }
 
@@ -262,6 +316,7 @@ struct SessionView: View {
 
 struct SessionEntryCard: View {
     let entry: SessionEntry
+    var showEditChevron: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -289,10 +344,247 @@ struct SessionEntryCard: View {
             Text(entry.netAmount.signedCurrencyString)
                 .font(.tabsMono(16))
                 .foregroundColor(entry.netAmount.earningsColor)
+            if showEditChevron {
+                Image(systemName: "pencil")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.tabsSecondary.opacity(0.5))
+                    .padding(.leading, 2)
+            }
         }
         .padding(12)
         .background(Color.tabsCard)
         .cornerRadius(14)
+    }
+}
+
+// MARK: - Edit Entry Sheet (Admin)
+// Allows any admin or co-admin to correct a submitted entry during an active
+// session.  Pre-fills from the existing entry so the admin only needs to change
+// what's wrong.
+
+struct EditEntrySheet: View {
+    let entry: SessionEntry
+
+    @EnvironmentObject var vm: AppViewModel
+    @Environment(\.dismiss) var dismiss
+
+    @State private var entryMode: EntryMode
+    @State private var buyInText: String
+    @State private var cashOutText: String
+    @State private var netText: String
+    @State private var isSaving = false
+    @State private var saved = false
+    @State private var saveFailed = false
+
+    enum EntryMode: String, CaseIterable {
+        case buyInOut = "Buy-in / Final"
+        case netOnly  = "Net Amount"
+    }
+
+    init(entry: SessionEntry) {
+        self.entry = entry
+        _entryMode  = State(initialValue: entry.isManualNet ? .netOnly : .buyInOut)
+        _buyInText  = State(initialValue: entry.isManualNet ? "" : Self.fmt(entry.buyIn))
+        _cashOutText = State(initialValue: entry.isManualNet ? "" : Self.fmt(entry.finalAmount))
+        _netText    = State(initialValue: entry.isManualNet ? Self.fmt(entry.netAmount) : "")
+    }
+
+    private static func fmt(_ v: Double) -> String {
+        v == 0 ? "" : String(format: "%g", v)
+    }
+
+    private var computedNet: Double? {
+        switch entryMode {
+        case .buyInOut:
+            guard let b = Double(buyInText), let o = Double(cashOutText) else { return nil }
+            return o - b
+        case .netOnly:
+            return Double(netText)
+        }
+    }
+
+    private var canSave: Bool { computedNet != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Edit Entry")
+                        .font(.tabsTitle(26))
+                        .foregroundColor(.tabsPrimary)
+                    Text(entry.playerName)
+                        .font(.tabsBody(14))
+                        .foregroundColor(.tabsSecondary)
+                }
+                Spacer()
+                DismissButton()
+            }
+
+            if saved {
+                savedState
+            } else {
+                editForm
+            }
+
+            Spacer()
+        }
+        .padding(24)
+        .background(Color.tabsBackground)
+    }
+
+    // MARK: - Edit Form
+
+    private var editForm: some View {
+        VStack(spacing: 20) {
+            // Mode toggle
+            HStack(spacing: 0) {
+                ForEach(EntryMode.allCases, id: \.self) { mode in
+                    Button {
+                        withAnimation(.tabsSnap) { entryMode = mode }
+                    } label: {
+                        Text(mode.rawValue)
+                            .font(.tabsBody(13, weight: .semibold))
+                            .foregroundColor(entryMode == mode ? .white : .tabsSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(entryMode == mode ? Color.tabsPrimary : Color.clear)
+                            .cornerRadius(12)
+                    }
+                }
+            }
+            .padding(4)
+            .background(Color.tabsCard)
+            .cornerRadius(16)
+
+            if entryMode == .buyInOut {
+                VStack(spacing: 12) {
+                    CurrencyField(label: "Total Buy-in", text: $buyInText)
+                    CurrencyField(label: "Final Amount (chips out)", text: $cashOutText)
+                    if let net = computedNet {
+                        HStack {
+                            Text("Net result:")
+                                .font(.tabsBody(14))
+                                .foregroundColor(.tabsSecondary)
+                            Spacer()
+                            Text(net.signedCurrencyString)
+                                .font(.tabsMono(18))
+                                .foregroundColor(net.earningsColor)
+                                .contentTransition(.numericText())
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                        .background(net >= 0 ? Color.tabsGreen.opacity(0.08) : Color.tabsRed.opacity(0.08))
+                        .cornerRadius(.tabsButtonRadius)
+                        .animation(.tabsSnap, value: net)
+                    }
+                }
+            } else {
+                VStack(spacing: 8) {
+                    CurrencyField(label: "Net amount (– for a loss)", text: $netText, allowNegative: true)
+                    Text("Positive = win (e.g. 120) · Negative = loss (e.g. –45)")
+                        .font(.tabsBody(12))
+                        .foregroundColor(.tabsSecondary)
+                        .padding(.horizontal, 4)
+                }
+            }
+
+            Button {
+                Task { await saveEdit() }
+            } label: {
+                Group {
+                    if isSaving {
+                        ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Label("Save Changes", systemImage: "checkmark")
+                    }
+                }
+            }
+            .buttonStyle(TabsPrimaryButtonStyle(color: .tabsPrimary))
+            .disabled(!canSave || isSaving)
+            .opacity(canSave ? 1 : 0.45)
+
+            if saveFailed {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.tabsRed)
+                    Text(vm.errorMessage ?? "Save failed — please try again.")
+                        .font(.tabsBody(13))
+                        .foregroundColor(.tabsRed)
+                }
+                .padding(14)
+                .background(Color.tabsRed.opacity(0.08))
+                .cornerRadius(12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    // MARK: - Saved State
+
+    private var savedState: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.tabsGreen)
+            Text("Entry Updated")
+                .font(.tabsTitle(26))
+                .foregroundColor(.tabsPrimary)
+            if let net = computedNet {
+                Text(net.signedCurrencyString)
+                    .font(.tabsMono(32))
+                    .foregroundColor(net.earningsColor)
+            }
+            Button("Done") { dismiss() }
+                .buttonStyle(TabsPrimaryButtonStyle())
+        }
+        .frame(maxWidth: .infinity)
+        .multilineTextAlignment(.center)
+    }
+
+    // MARK: - Save
+
+    @MainActor
+    private func saveEdit() async {
+        guard let net = computedNet else { return }
+        isSaving = true
+        saveFailed = false
+
+        let buyIn: Double
+        let cashOut: Double
+        let isManual: Bool
+        switch entryMode {
+        case .buyInOut:
+            buyIn   = Double(buyInText) ?? 0
+            cashOut = Double(cashOutText) ?? 0
+            isManual = false
+        case .netOnly:
+            buyIn   = 0
+            cashOut = 0
+            isManual = true
+        }
+
+        // Preserve the existing entry's ID and metadata so the listener update
+        // lands on the same document rather than creating a duplicate.
+        let updated = SessionEntry(
+            id: entry.id,
+            sessionId: entry.sessionId,
+            tableId: entry.tableId,
+            playerId: entry.playerId,
+            playerName: entry.playerName,
+            buyIn: buyIn,
+            finalAmount: cashOut,
+            netAmount: net,
+            submittedAt: entry.submittedAt,
+            isManualNet: isManual
+        )
+
+        let success = await vm.updateEntry(updated)
+        isSaving = false
+        if success {
+            withAnimation(.tabsSpring) { saved = true }
+        } else {
+            withAnimation { saveFailed = true }
+        }
     }
 }
 
@@ -312,17 +604,31 @@ struct SettlementView: View {
     @State private var settled = false
 
     private var isBalanced: Bool { abs(totalNet) < 0.01 }
-    private var disputeAmt: Double { abs(totalNet) }
+    // Keep the sign so +$5 and -$5 across sessions cancel out in the fund.
+    private var disputeAmt: Double { totalNet }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Handle
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Color.tabsSecondary.opacity(0.3))
-                .frame(width: 36, height: 5)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 12)
-                .padding(.bottom, 20)
+            // Top bar: drag handle + dismiss button
+            HStack {
+                // Dismiss button (top-left)
+                DismissButton()
+
+                Spacer()
+
+                // Drag indicator (centred)
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Color.tabsSecondary.opacity(0.3))
+                    .frame(width: 36, height: 5)
+
+                Spacer()
+
+                // Invisible spacer to balance the dismiss button width
+                Color.clear.frame(width: 34, height: 34)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 20)
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 24) {
@@ -352,6 +658,8 @@ struct SettlementView: View {
         }
         .background(Color.tabsBackground)
         .presentationCornerRadius(.tabsSheetRadius)
+        // LoadingOverlay only shown while settling; it doesn't disable swipe
+        // because interactiveDismissDisabled(false) is set on the sheet itself.
         .overlay { if isSettling { LoadingOverlay() } }
     }
 
@@ -386,6 +694,7 @@ struct SettlementView: View {
                 }
             }
             .buttonStyle(TabsPrimaryButtonStyle(color: .tabsGreen))
+            .disabled(isSettling)
         }
     }
 
@@ -401,9 +710,9 @@ struct SettlementView: View {
                 Text("Amounts don't balance")
                     .font(.tabsBody(16, weight: .semibold))
                     .foregroundColor(.tabsPrimary)
-                Text("Dispute amount: \(disputeAmt.currencyString)")
+                Text("Imbalance: \(disputeAmt.signedCurrencyString)")
                     .font(.tabsMono(24))
-                    .foregroundColor(.tabsRed)
+                    .foregroundColor(disputeAmt >= 0 ? .tabsGreen : .tabsRed)
             }
             .frame(maxWidth: .infinity)
 
@@ -418,13 +727,13 @@ struct SettlementView: View {
 
                 resolutionOption(
                     title: "Log to Dispute Fund",
-                    subtitle: "Track \(disputeAmt.currencyString) as unresolved on the table",
+                    subtitle: "Add \(disputeAmt.signedCurrencyString) to the table's dispute fund",
                     icon: "archivebox",
                     value: .disputeFund
                 )
                 resolutionOption(
                     title: "Split Evenly",
-                    subtitle: "Deduct \((disputeAmt / Double(max(entries.count, 1))).currencyString) from each player",
+                    subtitle: "\((disputeAmt / Double(max(entries.count, 1))).signedCurrencyString) applied to each player",
                     icon: "person.3",
                     value: .splitEvenly
                 )
@@ -443,6 +752,7 @@ struct SettlementView: View {
                 }
             }
             .buttonStyle(TabsPrimaryButtonStyle(color: .tabsPrimary))
+            .disabled(isSettling)
         }
     }
 
@@ -523,7 +833,7 @@ struct SettlementView: View {
                         .frame(width: 44, height: 44)
                     Image(systemName: icon)
                         .font(.system(size: 18))
-                        .foregroundColor(selectedResolution == value ? .white : .tabsSecondary)
+                        .foregroundColor(selectedResolution == value ? .tabsOnPrimary : .tabsSecondary)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -570,17 +880,25 @@ struct SettlementView: View {
     }
 
     // MARK: - Settle Action
+    // @MainActor ensures all @State mutations happen on the main thread,
+    // preventing the infinite-loading bug caused by off-thread state writes.
 
+    @MainActor
     private func settle() async {
+        guard !isSettling else { return }
         isSettling = true
         let dispAmount = isBalanced ? 0.0 : disputeAmt
-        await vm.settleSession(
+        let success = await vm.settleSession(
             session: session,
             entries: entries,
             resolution: selectedResolution,
             disputeAmount: dispAmount
         )
         isSettling = false
-        withAnimation { settled = true }
+        if success {
+            withAnimation(.tabsFluid) { settled = true }
+        }
+        // On failure, vm.errorMessage is set; the LoadingOverlay dismisses
+        // automatically and the user sees the error in the next redraw.
     }
 }

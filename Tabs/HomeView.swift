@@ -12,8 +12,8 @@ struct HomeView: View {
     @State private var showAddOptions = false
     @State private var showJoinTable = false
     @State private var showCreateTable = false
-    @State private var selectedTable: PokerTable? = nil
-    @State private var navigateToTable = false
+    @State private var showSettings = false
+    @State private var showAnalytics = false
 
     private var greeting: String {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -42,22 +42,29 @@ struct HomeView: View {
                                     .foregroundColor(.tabsPrimary)
                             }
                             Spacer()
-                            // Avatar
-                            ZStack {
-                                Circle()
-                                    .fill(Color.tabsPrimary)
-                                    .frame(width: 44, height: 44)
-                                Text(String(vm.currentUser?.name.prefix(1) ?? "?"))
-                                    .font(.tabsBody(18, weight: .semibold))
-                                    .foregroundColor(.white)
+                            // Avatar — taps to open Settings
+                            Button {
+                                showSettings = true
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.tabsPrimary)
+                                        .frame(width: 44, height: 44)
+                                    Text(String(vm.currentUser?.name.prefix(1) ?? "?"))
+                                        .font(.tabsBody(18, weight: .semibold))
+                                        .foregroundColor(.tabsOnPrimary)
+                                }
                             }
-                            .onTapGesture {
-                                vm.signOut()
-                            }
+                            .buttonStyle(ScaleButtonStyle(scale: 0.92))
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 20)
                         .padding(.bottom, 28)
+
+                        // Analytics strip
+                        analyticsStrip
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 20)
 
                         // Tables section
                         if vm.isLoadingTables {
@@ -65,8 +72,10 @@ struct HomeView: View {
                                 .padding(.top, 60)
                         } else if vm.tables.isEmpty {
                             emptyState
+                                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
                         } else {
                             tablesList
+                                .transition(.opacity)
                         }
 
                         Spacer(minLength: 100)
@@ -80,6 +89,20 @@ struct HomeView: View {
             .navigationDestination(for: PokerTable.self) { table in
                 TableDetailView(table: table)
             }
+            .navigationDestination(isPresented: $showAnalytics) {
+                AnalyticsView()
+                    .environmentObject(vm)
+            }
+            // Single load on appear — .task is lifecycle-aware and cancels on
+            // disappear, so it replaces the old .onAppear { Task { ... } }.
+            .task { await vm.loadTables() }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+                .environmentObject(vm)
+                .presentationDetents([.large])
+                .presentationCornerRadius(.tabsSheetRadius)
+                .preferredColorScheme(vm.isDarkMode ? .dark : .light)
         }
         .sheet(isPresented: $showJoinTable) {
             JoinTableView()
@@ -93,14 +116,48 @@ struct HomeView: View {
                 .presentationDetents([.medium])
                 .presentationCornerRadius(.tabsSheetRadius)
         }
-        .refreshable {
-            await vm.loadTables()
-        }
-        .task {
-            if vm.tables.isEmpty {
-                await vm.loadTables()
+        .refreshable { await vm.loadTables() }
+        .animation(.tabsSpring, value: vm.isLoadingTables)
+        .animation(.tabsSpring, value: vm.tables.isEmpty)
+    }
+
+    // MARK: - Analytics Strip
+
+    private var analyticsStrip: some View {
+        Button {
+            showAnalytics = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.tabsGreen.opacity(0.12))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.tabsGreen)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("My Analytics")
+                        .font(.tabsBody(15, weight: .semibold))
+                        .foregroundColor(.tabsPrimary)
+                    Text("Net P&L, win rate & history across all tables")
+                        .font(.tabsBody(12))
+                        .foregroundColor(.tabsSecondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.tabsSecondary.opacity(0.5))
             }
+            .padding(16)
+            .background(Color.tabsCard)
+            .cornerRadius(.tabsCardRadius)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(ScaleButtonStyle())
     }
 
     // MARK: - Tables List
@@ -118,10 +175,15 @@ struct HomeView: View {
                     NavigationLink(value: table) {
                         TableRowCard(table: table)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ScaleButtonStyle())
                     .padding(.horizontal, 16)
+                    .transition(.asymmetric(
+                        insertion: .push(from: .bottom).combined(with: .opacity),
+                        removal: .opacity
+                    ))
                 }
             }
+            .animation(.tabsSpring, value: vm.tables.count)
         }
     }
 
@@ -160,22 +222,25 @@ struct HomeView: View {
 
     private var fabButton: some View {
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                showAddOptions.toggle()
-            }
+            withAnimation(.tabsBounce) { showAddOptions.toggle() }
         } label: {
             ZStack {
                 Circle()
                     .fill(Color.tabsGreen)
                     .frame(width: 58, height: 58)
-                    .shadow(color: Color.tabsGreen.opacity(0.35), radius: 12, x: 0, y: 4)
+                    .shadow(color: Color.tabsGreen.opacity(showAddOptions ? 0.5 : 0.35),
+                            radius: showAddOptions ? 16 : 12, x: 0, y: 4)
+                    .animation(.tabsSnap, value: showAddOptions)
+
                 Image(systemName: showAddOptions ? "xmark" : "plus")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.white)
                     .rotationEffect(.degrees(showAddOptions ? 45 : 0))
-                    .animation(.spring(response: 0.25), value: showAddOptions)
+                    .scaleEffect(showAddOptions ? 0.85 : 1)
+                    .animation(.tabsBounce, value: showAddOptions)
             }
         }
+        .buttonStyle(ScaleButtonStyle(scale: 0.92))
         .padding(.trailing, 20)
         .padding(.bottom, 28)
         .overlay(alignment: .bottomTrailing) {
@@ -183,6 +248,10 @@ struct HomeView: View {
                 fabMenu
                     .padding(.trailing, 20)
                     .padding(.bottom, 96)
+                    .transition(.asymmetric(
+                        insertion: .push(from: .bottom).combined(with: .opacity),
+                        removal: .push(from: .top).combined(with: .opacity)
+                    ))
             }
         }
     }
@@ -190,15 +259,14 @@ struct HomeView: View {
     private var fabMenu: some View {
         VStack(alignment: .trailing, spacing: 10) {
             FabMenuItem(icon: "person.badge.plus", label: "Join Table") {
-                showAddOptions = false
+                withAnimation(.tabsBounce) { showAddOptions = false }
                 showJoinTable = true
             }
             FabMenuItem(icon: "plus.rectangle.on.rectangle", label: "Create Table") {
-                showAddOptions = false
+                withAnimation(.tabsBounce) { showAddOptions = false }
                 showCreateTable = true
             }
         }
-        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
 
@@ -210,14 +278,13 @@ struct TableRowCard: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            // Table icon
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.tabsPrimary)
                     .frame(width: 48, height: 48)
                 Image(systemName: "suit.club.fill")
                     .font(.system(size: 20))
-                    .foregroundColor(.white)
+                    .foregroundColor(.tabsOnPrimary)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -237,13 +304,14 @@ struct TableRowCard: View {
                                 .font(.tabsBody(12, weight: .medium))
                                 .foregroundColor(.tabsGreen)
                         }
+                        .transition(.scale.combined(with: .opacity))
                     }
                 }
             }
+            .animation(.tabsSnap, value: table.hasActiveSession)
 
             Spacer()
 
-            // Dispute badge if any
             if table.disputedAmount > 0 {
                 VStack(spacing: 2) {
                     Text("Disputed")
@@ -257,6 +325,7 @@ struct TableRowCard: View {
                 .padding(.vertical, 6)
                 .background(Color.tabsRed.opacity(0.1))
                 .cornerRadius(10)
+                .transition(.scale.combined(with: .opacity))
             }
 
             Image(systemName: "chevron.right")
@@ -278,28 +347,27 @@ struct FabMenuItem: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                // Label pill — explicit non-tinted colors so text is always visible
+            HStack(spacing: 12) {
                 Text(label)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.09, green: 0.09, blue: 0.20))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.white)
-                    .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 2)
+                    .foregroundColor(.tabsPrimary)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 11)
+                    .background(Color.tabsCard)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
 
-                // Icon circle
                 ZStack {
-                    Circle()
-                        .fill(Color(red: 0.09, green: 0.09, blue: 0.20))
-                        .frame(width: 46, height: 46)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.tabsGreen)
+                        .frame(width: 48, height: 48)
+                        .shadow(color: Color.tabsGreen.opacity(0.38), radius: 8, x: 0, y: 3)
                     Image(systemName: icon)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Color.white)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white)
                 }
             }
         }
-        .buttonStyle(.plain)   // prevents SwiftUI tint from washing out the label
+        .buttonStyle(ScaleButtonStyle(scale: 0.95))
     }
 }

@@ -9,6 +9,7 @@ import SwiftUI
 
 struct LogEntryView: View {
     let table: PokerTable
+    let session: GameSession   // passed directly — never reads table.activeSessionId
     let player: TablePlayer
 
     @EnvironmentObject var vm: AppViewModel
@@ -20,6 +21,7 @@ struct LogEntryView: View {
     @State private var netText: String = ""
     @State private var isLoading = false
     @State private var submitted = false
+    @State private var submitFailed = false
 
     enum EntryMode: String, CaseIterable {
         case buyInOut = "Buy-in / Final"
@@ -75,7 +77,7 @@ struct LogEntryView: View {
             HStack(spacing: 0) {
                 ForEach(EntryMode.allCases, id: \.self) { mode in
                     Button {
-                        withAnimation(.easeInOut(duration: 0.18)) { entryMode = mode }
+                        withAnimation(.tabsSnap) { entryMode = mode }
                     } label: {
                         Text(mode.rawValue)
                             .font(.tabsBody(13, weight: .semibold))
@@ -114,7 +116,7 @@ struct LogEntryView: View {
                             ? Color.tabsGreen.opacity(0.08)
                             : Color.tabsRed.opacity(0.08))
                         .cornerRadius(.tabsButtonRadius)
-                        .animation(.easeInOut(duration: 0.15), value: net)
+                        .animation(.tabsSnap, value: net)
                     }
                 }
             } else {
@@ -147,6 +149,21 @@ struct LogEntryView: View {
             .buttonStyle(TabsPrimaryButtonStyle(color: .tabsGreen))
             .disabled(!canSubmit || isLoading)
             .opacity(canSubmit ? 1 : 0.45)
+
+            // Error banner — shown only when the Firestore write failed
+            if submitFailed {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.tabsRed)
+                    Text(vm.errorMessage ?? "Failed to submit. Please try again.")
+                        .font(.tabsBody(13))
+                        .foregroundColor(.tabsRed)
+                }
+                .padding(14)
+                .background(Color.tabsRed.opacity(0.08))
+                .cornerRadius(12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
     }
 
@@ -184,11 +201,8 @@ struct LogEntryView: View {
 
     private func submitEntry() async {
         guard let net = netAmount else { return }
-
-        // Determine active session id from table
-        guard let sessionId = table.activeSessionId else { return }
-
         isLoading = true
+        submitFailed = false
 
         let buyIn: Double
         let finalAmount: Double
@@ -206,7 +220,7 @@ struct LogEntryView: View {
         }
 
         let entry = SessionEntry(
-            sessionId: sessionId,
+            sessionId: session.id,   // use session.id directly — never stale
             tableId: table.id,
             playerId: player.id,
             playerName: player.name,
@@ -216,9 +230,14 @@ struct LogEntryView: View {
             isManualNet: isManual
         )
 
-        await vm.submitEntry(entry)
+        let success = await vm.submitEntry(entry)
         isLoading = false
 
-        withAnimation { submitted = true }
+        if success {
+            withAnimation { submitted = true }
+        } else {
+            // vm.errorMessage is already set; surface a retry prompt
+            withAnimation { submitFailed = true }
+        }
     }
 }

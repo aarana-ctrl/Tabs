@@ -12,7 +12,6 @@
 		2590DA1C2F724D6000911AB6 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 2590DA1B2F724D6000911AB6 /* FirebaseFirestore */; };
 		2590DA1F2F72503E00911AB6 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 2590DA1E2F72503E00911AB6 /* GoogleSignIn */; };
 		2590DA212F72503E00911AB6 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 2590DA202F72503E00911AB6 /* GoogleSignInSwift */; };
-		25FD58592F71FBFA0091F185 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 25FD58582F71FBFA0091F185 /* GoogleService-Info.plist */; };
 		25FD585A2F71FBFA0091F185 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 25FD58582F71FBFA0091F185 /* GoogleService-Info.plist */; };
 		25FD585B2F71FBFA0091F185 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 25FD58582F71FBFA0091F185 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
@@ -42,7 +41,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		2590DA232F7253C100911AB6 /* Exceptions for "Tabs" folder in "Tabs" target */ = {
+		259913502F710503004C8014 /* Exceptions for "Tabs" folder in "Tabs" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -55,7 +54,7 @@
 		259913222F710501004C8014 /* Tabs */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				2590DA232F7253C100911AB6 /* Exceptions for "Tabs" folder in "Tabs" target */,
+				259913502F710503004C8014 /* Exceptions for "Tabs" folder in "Tabs" target */,
 			);
 			path = Tabs;
 			sourceTree = "<group>";
@@ -252,7 +251,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				25FD58592F71FBFA0091F185 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -444,17 +442,19 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Tabs/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = DAAR.Tabs;
+				PRODUCT_BUNDLE_IDENTIFIER = com.DAAR.Tabs;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -480,17 +480,19 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Tabs/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = DAAR.Tabs;
+				PRODUCT_BUNDLE_IDENTIFIER = com.DAAR.Tabs;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

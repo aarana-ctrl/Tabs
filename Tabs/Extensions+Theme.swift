@@ -56,6 +56,13 @@ extension Color {
     static let tabsGreenDark = Color(red: 0.17, green: 0.60, blue: 0.34)
     static let tabsRed       = Color(red: 0.93, green: 0.26, blue: 0.26)
 
+    /// Contrast color for content placed ON a tabsPrimary-filled background.
+    static let tabsOnPrimary = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.09, green: 0.09, blue: 0.20, alpha: 1)
+            : UIColor.white
+    })
+
     // ── Chart ────────────────────────────────────────────────────────────────
     static let chartPositive = Color(red: 0.24, green: 0.75, blue: 0.44)
     static let chartNegative = Color(red: 0.93, green: 0.26, blue: 0.26)
@@ -69,14 +76,12 @@ extension Color {
 // MARK: - Typography
 
 extension Font {
-    // Large serif display (matches the "Hi" heading in the reference)
     static func tabsDisplay(_ size: CGFloat = 48) -> Font {
         .custom("Georgia", size: size)
     }
     static func tabsTitle(_ size: CGFloat = 28) -> Font {
         .custom("Georgia", size: size)
     }
-    // Body / UI uses SF Pro (system font)
     static func tabsBody(_ size: CGFloat = 16, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .default)
     }
@@ -88,10 +93,26 @@ extension Font {
 // MARK: - Corner Radius
 
 extension CGFloat {
-    static let tabsCardRadius: CGFloat  = 24
-    static let tabsSheetRadius: CGFloat = 28
+    static let tabsCardRadius: CGFloat   = 24
+    static let tabsSheetRadius: CGFloat  = 28
     static let tabsButtonRadius: CGFloat = 16
-    static let tabsPillRadius: CGFloat  = 100
+    static let tabsPillRadius: CGFloat   = 100
+}
+
+// MARK: - Liquid Glass Spring System
+//
+// All animations in Tabs use one of four named spring presets so the
+// physics feel is consistent throughout the app.
+
+extension Animation {
+    /// Snappy — toggles, small state pops, icon swaps.
+    static let tabsSnap   = Animation.spring(response: 0.26, dampingFraction: 0.70)
+    /// Standard — card reveals, list insertions, badge changes.
+    static let tabsSpring = Animation.spring(response: 0.36, dampingFraction: 0.76)
+    /// Fluid — large section transitions, sheet content.
+    static let tabsFluid  = Animation.spring(response: 0.46, dampingFraction: 0.80)
+    /// Bounce — liquid-glass scale pops, FAB, spotlight entry.
+    static let tabsBounce = Animation.spring(response: 0.40, dampingFraction: 0.60)
 }
 
 // MARK: - View Modifiers
@@ -114,10 +135,14 @@ struct TabsPrimaryButtonStyle: ButtonStyle {
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 18)
-            .background(color.opacity(configuration.isPressed ? 0.8 : 1))
+            .background(
+                color
+                    .opacity(configuration.isPressed ? 0.80 : 1)
+                    .animation(.tabsSnap, value: configuration.isPressed)
+            )
             .cornerRadius(.tabsPillRadius)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.965 : 1)
+            .animation(.tabsSnap, value: configuration.isPressed)
     }
 }
 
@@ -128,14 +153,30 @@ struct TabsSecondaryButtonStyle: ButtonStyle {
             .foregroundColor(.tabsPrimary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 18)
-            .background(Color.tabsCard.opacity(configuration.isPressed ? 0.8 : 1))
+            .background(
+                Color.tabsCard
+                    .opacity(configuration.isPressed ? 0.75 : 1)
+                    .animation(.tabsSnap, value: configuration.isPressed)
+            )
             .cornerRadius(.tabsPillRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: .tabsPillRadius)
                     .strokeBorder(Color.tabsPrimary.opacity(0.15), lineWidth: 1.5)
             )
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.965 : 1)
+            .animation(.tabsSnap, value: configuration.isPressed)
+    }
+}
+
+/// Springy scale-down style for card-like tappable items.
+/// On press: scales down + slight brightness drop for a glass-press feel.
+struct ScaleButtonStyle: ButtonStyle {
+    var scale: CGFloat = 0.965
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .brightness(configuration.isPressed ? -0.018 : 0)
+            .animation(.tabsSnap, value: configuration.isPressed)
     }
 }
 
@@ -146,25 +187,37 @@ extension View {
 }
 
 // MARK: - Currency Formatter
+// Formatters are expensive to allocate — cache them as static instances
+// so each computed property call doesn't pay the allocation cost.
+
+private enum TabsFormatters {
+    static let currency: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle    = .currency
+        f.currencySymbol = "$"
+        f.maximumFractionDigits = 2
+        f.minimumFractionDigits = 0
+        return f
+    }()
+
+    // DateFormatter is expensive to allocate — one static instance is
+    // shared across the entire app to avoid per-call allocation overhead.
+    static let shortDate: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+}
 
 extension Double {
     var currencyString: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencySymbol = "$"
-        formatter.maximumFractionDigits = 2
-        formatter.minimumFractionDigits = 0
-        let str = formatter.string(from: NSNumber(value: abs(self))) ?? "$0"
+        let str = TabsFormatters.currency.string(from: NSNumber(value: abs(self))) ?? "$0"
         return self < 0 ? "-\(str)" : str
     }
 
     var signedCurrencyString: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencySymbol = "$"
-        formatter.maximumFractionDigits = 2
-        formatter.minimumFractionDigits = 0
-        let str = formatter.string(from: NSNumber(value: abs(self))) ?? "$0"
+        let str = TabsFormatters.currency.string(from: NSNumber(value: abs(self))) ?? "$0"
         if self > 0 { return "+\(str)" }
         if self < 0 { return "-\(str)" }
         return str
@@ -180,12 +233,7 @@ extension Double {
 // MARK: - Date Helpers
 
 extension Date {
-    var shortDisplay: String {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
-        return f.string(from: self)
-    }
+    var shortDisplay: String { TabsFormatters.shortDate.string(from: self) }
 }
 
 // MARK: - Dismissable Sheet
@@ -203,18 +251,26 @@ struct DismissButton: View {
                 .background(Color.tabsCardSecondary)
                 .clipShape(Circle())
         }
+        .buttonStyle(ScaleButtonStyle(scale: 0.90))
     }
 }
 
 // MARK: - Loading Overlay
+// Uses a blur material instead of a solid black scrim for a liquid-glass look.
 
 struct LoadingOverlay: View {
     var body: some View {
         ZStack {
-            Color.black.opacity(0.3).ignoresSafeArea()
-            ProgressView()
-                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                .scaleEffect(1.5)
+            Color.black.opacity(0.25).ignoresSafeArea()
+            ZStack {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 80, height: 80)
+                    .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .primary))
+                    .scaleEffect(1.3)
+            }
         }
     }
 }
@@ -244,8 +300,6 @@ struct EmptyStateView: View {
 }
 
 // MARK: - Floating Label TextField
-// Used by JoinCreateTableView; text color is explicitly dark so it's
-// visible against the white card background in both light and dark mode.
 
 struct FloatingTextField: View {
     let label: String
@@ -261,10 +315,10 @@ struct FloatingTextField: View {
             }
             TextField(text.isEmpty ? label : "", text: $text)
                 .font(.tabsBody(16))
-                .foregroundColor(.tabsPrimary)         // explicit dark color
-                .tint(.tabsPrimary)                    // cursor color
+                .foregroundColor(.tabsPrimary)
+                .tint(.tabsPrimary)
         }
-        .animation(.easeInOut(duration: 0.15), value: text.isEmpty)
+        .animation(.tabsSnap, value: text.isEmpty)
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
         .background(Color.tabsCard)
@@ -272,8 +326,63 @@ struct FloatingTextField: View {
     }
 }
 
+// MARK: - Liquid Glass Toggle
+// A custom on/off toggle with a fluid spring animation on the thumb and a
+// subtle glass highlight strip on the track — liquid-glass design.
+
+struct LiquidGlassToggle: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.tabsBounce) { isOn.toggle() }
+        } label: {
+            ZStack(alignment: isOn ? .trailing : .leading) {
+                // Track background
+                Capsule()
+                    .fill(isOn ? Color.tabsGreen : Color.tabsCardSecondary)
+                    .frame(width: 51, height: 31)
+                    .animation(.tabsSnap, value: isOn)
+
+                // Glass sheen on the track
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.20), Color.clear],
+                            startPoint: .topLeading, endPoint: .center
+                        )
+                    )
+                    .frame(width: 51, height: 31)
+                    .allowsHitTesting(false)
+
+                // Thumb with glass highlight
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.white, Color.white.opacity(0.90)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 27, height: 27)
+                    .shadow(color: Color.black.opacity(0.20), radius: 4, y: 2)
+                    .overlay(
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.55), Color.clear],
+                                    startPoint: .topLeading, endPoint: .center
+                                )
+                            )
+                            .padding(3)
+                    )
+                    .padding(.horizontal, 2)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Currency Field
-// Explicit foreground + tint colors so typed digits are clearly visible.
 
 struct CurrencyField: View {
     let label: String
@@ -289,8 +398,8 @@ struct CurrencyField: View {
 
             TextField("0", text: $text)
                 .font(.tabsMono(20))
-                .foregroundColor(.tabsPrimary)         // explicit dark color
-                .tint(.tabsPrimary)                    // cursor color
+                .foregroundColor(.tabsPrimary)
+                .tint(.tabsPrimary)
                 .keyboardType(allowNegative ? .numbersAndPunctuation : .decimalPad)
                 .padding(.leading, 4)
                 .padding(.vertical, 16)
@@ -305,9 +414,10 @@ struct CurrencyField: View {
                     .foregroundColor(.tabsSecondary)
                     .padding(.horizontal, 18)
                     .offset(y: -9)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.top, text.isEmpty ? 0 : 6)
-        .animation(.easeInOut(duration: 0.12), value: text.isEmpty)
+        .animation(.tabsSnap, value: text.isEmpty)
     }
 }

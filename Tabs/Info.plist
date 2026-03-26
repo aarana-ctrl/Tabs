@@ -14,10 +14,6 @@
 				<string>com.googleusercontent.apps.797921172338-i1qhnv8tveagvbns1fvmci7hadprrgpi</string>
 			</array>
 		</dict>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>None</string>
-		</dict>
 	</array>
 </dict>
 </plist>
