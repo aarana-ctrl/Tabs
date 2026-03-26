@@ -22,10 +22,17 @@ struct LogEntryView: View {
     @State private var isLoading = false
     @State private var submitted = false
     @State private var submitFailed = false
+    @State private var showOverrideConfirm = false
 
     enum EntryMode: String, CaseIterable {
         case buyInOut = "Buy-in / Final"
         case netOnly  = "Net Amount"
+    }
+
+    /// The player's existing entry for this session, if any.
+    /// Derived from the real-time listener — always current.
+    private var existingEntry: SessionEntry? {
+        vm.sessionEntries.first(where: { $0.playerId == player.id })
     }
 
     private var netAmount: Double? {
@@ -73,6 +80,28 @@ struct LogEntryView: View {
 
     private var entryForm: some View {
         VStack(spacing: 20) {
+            // Existing-entry warning banner
+            if let existing = existingEntry {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Entry already submitted")
+                            .font(.tabsBody(13, weight: .semibold))
+                            .foregroundColor(.tabsPrimary)
+                        Text("Previous result: \(existing.netAmount.signedCurrencyString). Submitting again will override it.")
+                            .font(.tabsBody(12))
+                            .foregroundColor(.tabsSecondary)
+                    }
+                    Spacer()
+                }
+                .padding(14)
+                .background(Color.orange.opacity(0.10))
+                .cornerRadius(12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Mode toggle
             HStack(spacing: 0) {
                 ForEach(EntryMode.allCases, id: \.self) { mode in
@@ -133,22 +162,36 @@ struct LogEntryView: View {
                 }
             }
 
-            // Submit
+            // Submit — routes through override confirmation when a prior entry exists
             Button {
-                Task { await submitEntry() }
+                if existingEntry != nil {
+                    showOverrideConfirm = true
+                } else {
+                    Task { await submitEntry() }
+                }
             } label: {
                 Group {
                     if isLoading {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     } else {
-                        Text("Submit Entry")
+                        Text(existingEntry != nil ? "Override Entry" : "Submit Entry")
                     }
                 }
             }
-            .buttonStyle(TabsPrimaryButtonStyle(color: .tabsGreen))
+            .buttonStyle(TabsPrimaryButtonStyle(color: existingEntry != nil ? .orange : .tabsGreen))
             .disabled(!canSubmit || isLoading)
             .opacity(canSubmit ? 1 : 0.45)
+            .alert("Override Previous Entry?", isPresented: $showOverrideConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Override", role: .destructive) {
+                    Task { await submitEntry() }
+                }
+            } message: {
+                if let existing = existingEntry, let net = netAmount {
+                    Text("Your previous result of \(existing.netAmount.signedCurrencyString) will be replaced with \(net.signedCurrencyString).")
+                }
+            }
 
             // Error banner — shown only when the Firestore write failed
             if submitFailed {
@@ -219,7 +262,12 @@ struct LogEntryView: View {
             isManual = true
         }
 
+        // Reuse the existing entry's document ID so Firestore's setData(from:)
+        // overwrites that document rather than creating a duplicate.
+        let entryId = existingEntry?.id ?? UUID().uuidString
+
         let entry = SessionEntry(
+            id: entryId,
             sessionId: session.id,   // use session.id directly — never stale
             tableId: table.id,
             playerId: player.id,
@@ -230,7 +278,12 @@ struct LogEntryView: View {
             isManualNet: isManual
         )
 
-        let success = await vm.submitEntry(entry)
+        // updateEntry and submitEntry both call service.submitEntry (setData),
+        // but updateEntry signals intent clearly for future distinction.
+        let success = existingEntry != nil
+            ? await vm.updateEntry(entry)
+            : await vm.submitEntry(entry)
+
         isLoading = false
 
         if success {

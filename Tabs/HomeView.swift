@@ -82,7 +82,22 @@ struct HomeView: View {
                     }
                 }
 
-                // Floating action button
+                // FAB menu items — sibling of the FAB button so they are
+                // completely outside the Button's view hierarchy.  When they
+                // were in the Button's .overlay, SwiftUI's button interaction
+                // system propagated its default circular press highlight into
+                // the child FabMenuItem buttons, causing the dark ghost circles.
+                if showAddOptions {
+                    fabMenu
+                        .padding(.trailing, 20)
+                        .padding(.bottom, 96)
+                        .transition(.asymmetric(
+                            insertion: .push(from: .bottom).combined(with: .opacity),
+                            removal:   .push(from: .top).combined(with: .opacity)
+                        ))
+                }
+
+                // Floating action button (circle only — no overlay)
                 fabButton
             }
             .navigationBarHidden(true)
@@ -243,17 +258,6 @@ struct HomeView: View {
         .buttonStyle(ScaleButtonStyle(scale: 0.92))
         .padding(.trailing, 20)
         .padding(.bottom, 28)
-        .overlay(alignment: .bottomTrailing) {
-            if showAddOptions {
-                fabMenu
-                    .padding(.trailing, 20)
-                    .padding(.bottom, 96)
-                    .transition(.asymmetric(
-                        insertion: .push(from: .bottom).combined(with: .opacity),
-                        removal: .push(from: .top).combined(with: .opacity)
-                    ))
-            }
-        }
     }
 
     private var fabMenu: some View {
@@ -353,9 +357,12 @@ struct FabMenuItem: View {
                     .foregroundColor(.tabsPrimary)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 11)
-                    .background(Color.tabsCard)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .shadow(color: .black.opacity(0.10), radius: 8, x: 0, y: 3)
+                    // .regularMaterial gives frosted-glass contrast in both light and
+                    // dark mode — Color.tabsCard was nearly invisible against the dark
+                    // background, creating the "ghost circle" artifact.
+                    .background(.regularMaterial,
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
 
                 ZStack {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
