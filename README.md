@@ -6,8 +6,10 @@ Tabs is a cross-platform poker session tracker for friend groups. It keeps a run
 
 ## Platforms
 
-| iOS | SwiftUI + Firebase iOS SDK | Xcode / TestFlight |
-| Web | React 18 + TypeScript + Vite + Tailwind CSS | Vercel |
+iOS : SwiftUI + Firebase iOS SDK
+Web : React 18 + TypeScript + Vite + Tailwind CSS
+
+** Web app repo is private for security reasons. The link to the website is : https://tabs-web.vercel.app
 
 Both apps share the same Firestore database, so any action taken on one platform is immediately reflected on the other.
 
