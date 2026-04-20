@@ -97,3 +97,16 @@ Tabs/ (iOS)
 ## Auth
 
 Authentication uses **Firebase Anonymous Auth** — players sign in with a display name and are assigned a persistent anonymous UID. No email or password required.
+
+---
+
+## Screenshots
+
+Example screenshots from the app. Some detailed have been blacked out for privacy reasons. 
+
+<img width="1206" height="2626" alt="test" src="https://github.com/user-attachments/assets/16478776-efe0-4c13-a7f2-345210edfaf3" />
+<img width="1206" height="2622" alt="test" src="https://github.com/user-attachments/assets/e43e1e60-1d4e-47e1-8005-c64398ceadda" />
+<img width="1206" height="2630" alt="test-4" src="https://github.com/user-attachments/assets/1343cafb-7455-462f-a32c-729472968205" />
+<img width="1206" height="2622" alt="test-3" src="https://github.com/user-attachments/assets/d16f4c2d-2f6f-4a8c-a993-08ecc78c1a0c" />
+<img width="1206" height="2622" alt="test-2" src="https://github.com/user-attachments/assets/54500261-0142-4ebe-b6ea-b5c03f57cba1" />
+
