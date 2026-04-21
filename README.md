@@ -104,18 +104,19 @@ Authentication uses **Firebase Anonymous Auth** — players sign in with a displ
 
 Example screenshots from the app. Some detailed have been blacked out for privacy reasons. 
 
-<img width="300" height="300" alt="test" src="https://github.com/user-attachments/assets/16478776-efe0-4c13-a7f2-
-345210edfaf3" />
+<img width="1206" height="2626" alt="test" src="https://github.com/user-attachments/assets/291306d9-42de-4d81-bd79-4c3760e3de39" />
 
 
-<img width="300" height="300" alt="test" src="https://github.com/user-attachments/assets/e43e1e60-1d4e-47e1-8005-c64398ceadda" />
+<img width="1206" height="2622" alt="test" src="https://github.com/user-attachments/assets/67a4ec9b-e5bf-498f-a78d-84d71157416e" />
 
 
-<img width="300" height="300" alt="test-4" src="https://github.com/user-attachments/assets/1343cafb-7455-462f-a32c-729472968205" />
+<img width="1206" height="2624" alt="test-5" src="https://github.com/user-attachments/assets/e4ec8d54-3353-4e85-ad85-b09da45ad550" />
 
 
-<img width="300" height="300" alt="test-3" src="https://github.com/user-attachments/assets/d16f4c2d-2f6f-4a8c-a993-08ecc78c1a0c" />
+<img width="1206" height="2630" alt="test-4" src="https://github.com/user-attachments/assets/2f74b7df-afbe-4b8b-9a4a-f73c8abcb854" />
 
 
-<img width="300" height="300" alt="test-2" src="https://github.com/user-attachments/assets/54500261-0142-4ebe-b6ea-b5c03f57cba1" />
+<img width="1206" height="2622" alt="test-3" src="https://github.com/user-attachments/assets/5121d87d-a559-4d73-b8b3-ad9233b0f6ca" />
 
+
+<img width="1206" height="2622" alt="test-2" src="https://github.com/user-attachments/assets/87ca8931-4049-4d9a-8526-25ccdc3b84fe" />
